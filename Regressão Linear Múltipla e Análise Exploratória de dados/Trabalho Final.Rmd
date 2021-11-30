@@ -1,0 +1,458 @@
+---
+title: "Análise de regressão linear em dados de aluguel de imóveis"
+output: html_notebook
+author: "Diego de Almeida Miranda - 133603"
+---
+
+## Apresentação 
+
+A regressão linear é um processo que busca traçar uma reta que relacione os dados apresentados num diagrama de dispersão. Dessa forma podemos avaliar se existe, de fato, uma linearidade entre as variáveis envolvidas na regressão. Utilizando desta ferramenta podemos estabelecer análises das mais diversas relações encontradas em nossa realidade.
+
+Uma regressão linear pode ser dada de forma n-dimensionál, tendo como objetivo utilizar $n-1$ destas dimensões, chamadas de variáveis independentes, para descrever o comportamento de uma outra, chamada de variável dependente. Quando possuímos um conjunto bidimensional estamos trabalhando com uma regressão linear simples, onde os valores apresentados no eixo $X$ buscam descrever os valores visto no eixo $Y$. De outra forma, quando utilizamos mais de uma dimensão, ou característica destes dados, estamos trabalhando em uma regressão linear múltipla, na qual podemos combinar estas diversas características para compreender o comportamento de uma outra. 
+
+Vale ressaltar o fato de que uma regressão não se limita a avaliar a linearidade dos dados, podendo haver também modelos que nos permitem reconhecer qual função não linear melhor se ajusta ao dados em questão.
+
+Neste trabalho apresentaremos dados que descrevem apartamentos em locação na cidade de Manhattan, centro urbano de New York, no estado de mesmo nome dos Estados Unidos da América. Teremos como alvo de entendimento o valor destes alugueis e, para isso, analisaremos características complementares ao apartamento que serão apresentadas a seguir.
+
+Os dados foram obtidos na plataforma _Kaggle_ que reúne diversos estudantes e pesquisadores que contribuem abertamento com a disponilização de exercícios, conjuntos de dados e pipelines que descrevem métodos em ciência de dados. Mais especificamente, o conjunto de dados foi disponibilizado pelo usuário _Zohaib30_ e pode ser acessado [aqui](https://www.kaggle.com/zohaib30/streeteasy-dataset/notebooks).
+
+O trabalho será apresentado em formato de notebook, pois desta forma é facilitada a sua construção e visualização de resultados.
+
+### Requisitando bibliotecas necessárias
+ 
+Estas são as bibliotecas utilizadas durante toda a análise e construção dos modelos de regressão.
+
+```{r}
+base::library(pacman)
+pacman::p_load(car, nortest, psych, olsrr, corrplot, ggplot2)
+```
+
+## Os dados
+
+Os dados obtidos possuem o formato de tabela salvos numa extensão ".xls" e pode ser acessada ao definir o nosso dataframe da seguinte maneira: 
+
+```{r}
+df <- utils::read.csv("./manhattan.xls")
+df
+```
+Podemos ver que originalmente nossos dados possuem $3539$ linhas, ou amostras,  e $18$ colunas que representam as variáveis da nossa regressão.
+
+As colunas representam as seguintes caracteristicas de nossos dados:
+
+  1. rental_id - identificador do aluguel
+
+  2. rent - valor do aluguel em dólares
+  
+  3. bedrooms - número de quartos
+  
+  4. bathrooms - número de banheiros
+  
+  5. size_sqft - tamanho do apartamento em pés quadrados
+  
+  6. min_to_subway - distância até o metrô em minutos
+  
+  7. floor - número do andar onde está o prédio
+  
+  8. building_age_yrs - idade do edifício em anos
+  
+As colunas não citadas apresentam dados qualitativos, o que dificultaria a construção do nosso modelo. Portanto, foi decidido manter apenas as características quantitatívas de cada amostra. 
+
+Agora podemos remover as colunas que não são de nosso interesse.
+
+```{r}
+drops <- c("no_fee", "has_roofdeck", "has_washer_dryer", "has_doorman", "has_elevator", "has_dishwasher", "has_patio", "has_gym", "neighborhood",     "borough", "rental_id")
+df<- df[ , !(names(df) %in% drops)]
+```
+
+Podemos conferir se existe alguma amostra com dados faltantes da seguinte maneira:
+
+```{r}
+base::which(base::is.na(df))
+```
+Portanto, todas as entradas são válidas no nosso conjunto de dados.
+
+## Exploração dos dados
+
+Agora que temos um conjunto de dados pronto para ser análisado, podemos explorar algumas características que podem nos nortear na análise do nosso problema de regressão.
+
+A função *summary(df)* apresenta algumas estatísticas de cada coluna do nosso dataframe.
+```{r}
+base::summary(df)
+```
+
+Com isso, sabemos então que o menor valor de *rent* é de $1300$ dólares, enquanto o maior valor de *size_sqft* é de $4800.0$.
+
+Podemos acessar as amostras que possuem o valor máximo de aluguel e verificar se alguma destas possui o valor máximo de pés quadrados.
+
+```{r}
+df[df$rent == base::max(df$rent), ]
+```
+
+Curiosamente nenhuma das amostras com o valor máximo de aluguel possui o valor máximo de pés quadrados.
+
+Uma maneira simplificada de observarmos as correlações entre as variáveis é a partir da construção de um heatmap, na qual cores mais intensas indicam maior correlação entre as variáveis.
+
+O coeficiente de correlação apresentado é o coeficiente de Pearson que pode ser calculado da seguinte maneira:
+\begin{equation*}
+r = \frac{\sum{(x_i - \overline{x})(y_i-\overline{y})}}{\sqrt{\sum{(x_i - \overline{x})^2 \sum{(y_i - \overline{y})^2}}}}
+\end{equation*}
+
+```{r}
+corrplot::corrplot.mixed(stats::cor(df), lower = "number", upper = "color", diag = "l", tl.pos = "lt")
+```
+
+A partir deste gráfico podemos concluir que a variável *rent* possui alta correlação, com valor de $r = 0.86$, com a variável *size_sqft*.
+
+Por conta disso, faremos uma regressão linear simples em busca de avaliar o quanto a variável *size_sqft* descreve *rent*.
+
+## Regressão linear simples
+
+Em uma regressão linear simples o valor esperado de $Y$ para cada valor de $X$ é:
+\begin{equation*}
+E(Y|X) = \beta_0 + \beta_1X
+\end{equation*}
+onde os parâmetros da reta, $\beta_0$ e $\beta_1$, são constantes desconhecidas.
+Quando $X=0$, \beta_0 é o ponto onde a reta cruza o eixo de $Y$ e, por esta razão, $\beta_0$ é chamado de *intercepto*. De forma geral, chamamos $\beta_1$ é o coeficiente de regressão.
+
+Assim sendo, dados $n$ pares de valores $(X_1, Y_1), ...,  (X_n, Y_n)$, o modelo estatístico é da regressão linear é dado por
+
+\begin{equation*}
+Y_i = \beta_0 + \beta_1 X_i + \varepsilon_i, i=1,2,3,..., n
+\end{equation*}
+
+Sendo $\varepsilon$ o resíduo, ou erro, que iremos analisar mais a frente e $\beta_0$ e $\beta_1$ os parâmetros a serem estimados.
+
+### Pressuposições do modelo linear
+
+ Ao estabelecer este modelo, pressupõe-se que:
+
+  1. A relação entre $Y$ e $X$ é linear;
+  2. Os valores de $X$ são fixos (ou controlados);
+  3. A média do erro é nula, isto é, $E(\varepsilon_i) = 0$;
+  4. O erro é homocedástico, ou que se tem homocedasticia.
+  5. Os erros são independentes, ou seja, $Cov(\varepsilon_i, \varepsilon_{i'}) = 0$, para $i\neq i'$;
+  6. Os erros tem distribuição normal. 
+
+Portanto $Y_i \sim N(\beta_0 + \beta_1X_i, \sigma^2)$.
+
+A proposta é encontrarmos os parâmetros $\beta_0$ e $\beta_1$ de forma que o erro observador no vetor $\varepsilon = (\varepsilon_1, \varepsilon_2, ..., \varepsilon_n)$
+
+
+Pelo método dos quadrados mínimos, sabemos que
+\begin{equation*}
+\beta_0 = \overline{Y} - \widehat{\beta}_1\overline{X}
+\end{equation*}
+e
+\begin{equation*}
+\widehat{\beta}_1 = \frac{\sum x_iy_i}{\sum x_i^2}
+\end{equation*}
+
+sendo $\widehat{\beta}_1$ um estimador não viesado.
+
+### Modelo estatístico
+
+Podemos iniciar definindo o modelo estatístico de regressão com as nossas variáveis de interesse.
+
+```{r}
+Mod1<- stats::lm(rent~size_sqft, df)
+Mod1
+```
+
+A principio temos um modelo definido como:
+
+\begin{equation*}
+\widehat{y}_i = -196,364 + 5,678x_i
+\end{equation*}
+
+Podemos interpretar de forma que um imóvel com 0 pés quadrados tenha um aluguel de  -196,364 dólares. Além disso, cada pé quadrado aumenta em 5,678 dólares o preço do imóvel.
+
+Apesar disso, ainda existem alguns outros diversos testes que avaliam os pressupostos dos nossos modelos. Caso os pressupostos não sejam atendidos, de nada vale a construção deste modelo.
+
+### Análise gráfica do modelo
+
+Para um melhor entendimento deste modelo podemos utilizar métodos de visualização mais descritivos sobre estas variáveis, onde é utilizado o vetor de resíduos $\varepsilon$ que representa o erro entre o nosso modelo de regressão e o valor real: 
+
+```{r}
+graphics::par(mfrow=c(2,2))
+graphics::plot(Mod1)
+```
+
+
+O gráfico _Residuals vs Fitted_ permite que visualizemos com mais clareza a linearidade destas variáveis. A linha pontilhada encontrada ao centro deste gráfico apresenta um modelo linear, já a linha vermelha demonstra qual a relação dos nossos dados. Visto que a linha vermelha neste gráfico está muito próxima do pontilhado, podemos considerar que o o pressuposto de linearidade entre $X$ e $Y$ foi atendido.
+
+Além disso, observando o _Residuals vs Fitted_ podemos concluir que existe uma heterogeneidade de variâncias, não acatando o pressuposto de homoceidasticidade. Tal informação também pode ser obtida observando o gráfico _Scale-Location_, o qual traça uma linha diagonal, e não uma horizontal como esperado.
+
+O gráfico _Normal Q-Q_ apresenta se os resíduos possuem ou não uma distribuição normal. O gráfico sugere que as caudas da distribuição possuem muito próximos a média ou então apresentando caudas muito longas. Podemos confirmar isso a partir da visualização do histograma destes resíduos:
+
+```{r}
+graphics::hist(residuals(Mod1))
+```
+
+O gráfico _Residuals vs Leverage_ apresenta quais pontos estão sendo mais influentes no modelo, pontos amostrais estes que interferem negativamente na construção do modelo de regressão linear.
+
+
+### Gráfico dos resíduos
+
+Apesar de termos conseguido extrair uma boa quantida de informação na análise gráfico geral do modelo, vamos prosseguir observando mais específicamente os resíduos obtidos desta regressão. A seguir é possível ver o gráfico dos resíduos ordinários do modelo.
+
+```{r}
+graphics::par(mfrow=c(1,1))
+graphics::plot(residuals(Mod1))
+```
+
+A partir deste gráfico podemos ver que existem pontos discrepantes em nosso conjunto de dados.
+
+### Teste de normalidade dos resíduos
+
+Outra maneira de avaliar a normalidade destes resíduos é utilizando testes clássicos como o Shapiro-Wilks visto a seguir. Este teste possui como hipótese nula $H_0$ _: distribuição dos resíduos = normal_ e como hipótese alternativa $H_1$ _: distribuição dos resíduos $\neq$ normal_, então
+
+```{r}
+stats::shapiro.test(residuals(Mod1))
+```
+
+Como temos um p-valor menor que 0.05, então podemos rejeitar a hipótese nula de que os resíduos possuem uma distribuição normal, isto é, os resíduos não possuem distribuição normal.
+
+
+
+### Teste de heterogeneidade de variâncias
+
+O teste de Breusch-Pagan possui como hipótese nula que há homogeneidade de variância e hipótese alternativa a heterogeneidade da mesma.
+
+```{r}
+car::ncvTest(Mod1)
+```
+Como temos um p-valor menor que 0.05, devemos rejeitar a hipótese nula, o que nos leva novamente a conclusão que os dados possuem heterogeneceidade.
+
+### Coeficiente de determinação
+
+Não é usual que façamos a análise do coeficiente de determinação $\overline{R^2}$ sozinho, pois ele pode trazer confusão ao analizar os dados. Além disso, a função _summary_ nos trás outras informações interessantes a serem analisadas.
+
+```{r}
+base::summary(Mod1)
+```
+Podemos observar que o p-valor da variável *size_sqft* é menor que $0.05$, portanto sabemos que ele é diferente de zero e impacta de alguma forma os valores de *rent*. O coeficiente de *size_sqft* é de $5.6775$.
+
+Observando o R quadrado podemos interpretar que o tamanho do apartamento justifica $73.6%$ do valor dos imóveis.
+
+A estatística F apresenta que o modelo construído possui um desempenho melhor do que um modelo sem capacidade de previsão, pois o p-valor é menor que $0.05$.
+
+### Transformação em *rent*
+
+Por encontrarmos uma heterogeneidade de variâncias no *Mod1*, vamos então aplicar uma transformação no eixo $Y$, que representa a variável *rent*, a fim de tornar homogenea a variãncia dos resíduos do nosso modelo.
+
+```{r}
+Mod2 <- stats::lm(base::log(rent)~size_sqft, df)
+Mod2
+```
+
+Temos então nosso novo modelo:
+\begin{equation*}
+log(\widehat{y}_i) = 7.5653631 + 0,0008914x_i
+\end{equation*}
+
+Que pode ser avaliado visualmente a partir do gráfico de resíduos.
+
+```{r}
+graphics::par(mfrow=c(2,2))
+graphics::plot(Mod2)
+```
+
+Podemos ver pelo gráfico *Residuals vs Fitted* que a heterogeneidade de variãncia pesiste no nosso modelo. Confirmaremos isto a partir do teste de Breusch-Pagan.
+
+```{r}
+car::ncvTest(Mod2)
+```
+
+e novamente temos um p-valor menor que $0.05$ e devemos rejeitar a hipótese nula da homogeneidade de variâncias.
+
+### Conclusão da regressão linear simples em *size_sqft*
+
+Podemos observar que apesar das variáveis *rent* e *size_sqft* apresentarem uma relação linear, não é possível utilizarmos do modelo de regressão linear simples neste caso, pois parte dos pressupostos definidos anteriormente, como a homogeneidade de variâncias e uma distribuição normal, não foram atendidos. 
+
+## Regressão linear múltipla 
+
+Agora analisaremos um modelo que utiliza todos os atributos disponíveis em nosso conjunto de dados para a construção do modelo. Desta maneira, teremos o seguinte modelo:
+
+\begin{equation*}
+Y = \beta_0 + \beta_1X_1 + \beta_2X_2 + \beta_3X_3 + \beta_4X_4 + \beta_5X_5 + \beta_6X_6 + \varepsilon 
+\end{equation*}
+
+Ou então, pela notação de matriz:
+
+\begin{equation*}
+Y = X\theta + \varepsilon
+\end{equation*}
+
+Onde Y é um vetor de dimensões $n \times 1$ da variável aleatória de $Y$ e $X$ é uma matriz de dimensões $n \times p$, com $p=k+1$ número de parâmetros. Note que neste caso, temos $n=3539$ e $p=7$. $\theta$ é um vetor $p\times 1$ de parâmetros desconhecidos, os $\beta_i$s, e também $\varepsilon$ um vetor $n \times 1$ de variáveis aleatórias não observáveis. 
+
+Podemos definir o modelo em R da seguinte forma: 
+
+```{r}
+Mod3<-stats::lm(rent~., df)
+```
+
+Onde o "." representa todas as outras variáveis contidas no nosso datafra´me.
+
+O modelo pode ser visualizado da seguinte maneira:
+
+```{r}
+Mod3
+```
+
+Ou seja, 
+
+\begin{equation*}
+Y_i = -498.661 -314.442X_{i1} + 1168.163X_{i2} + 4.951X_{i3} - 16.816X_{i4} + 22.806X_{i5} - 7.202X_{i6}
+\end{equation*}
+
+Com nosso modelo construído podemos começar a analisar os resíduos contidos no vetor $\varepsilon$ para avaliar se as suposições, inicialmente apresentadas, do modelo de regressão linear são atendidas.
+
+### Análise gráfica do modelo
+
+A análise gráfica do modelo permite que tiremos diversas conclusões apenas observando o comportamento dos resíduos em determinados gráficos. A vantagem da utilização destes recursos é que não existem hipóteses e/ou condições necessárias sobre o conjunto de dados  para utiliza-los. Vejamos então a seguir:
+
+```{r}
+graphics::par(mfrow=c(2,2))
+graphics::plot(Mod3)
+```
+O gráfico *Residuals vs Fitted* nos indica que existe uma relação quase linear entre as variáveis do modelo, mas logo ao lado podemos observar o gráfico *Normal Q-Q* expressando que os erros não possuem distribuição normal. Podemos visualizar a distribuição dos erros a partir do seguinte histograma.
+
+```{r}
+graphics::hist(stats::residuals(Mod3))
+```
+A partir do gráfico *Scale-Location* podemos ver que a raiz quadrado dos resíduos padronizados está longe de formarem, visualmente, um retângulo e, com isso, traçando mais uma vez uma reta diagonal que apresenta uma não homocedasticidade. Portanto, até aqui já temos duas das suposições iniciais invalidadas, apresentando que o modelo, da forma que está, não é válido.
+
+A partir do gráfico *Residuals vs Leverage* observamos que a amostra número 5 parece ser muito influente em nosso conjunto de dados.
+
+### Normalidade de resíduos
+
+Realizando o teste de Shapiro-Wilk com grau de significância igual a 0.05, temos:
+```{r}
+stats::shapiro.test(residuals(Mod3))
+```
+
+Visto que o Shapiro Wilk tem a hipótese nula de que os dados possuem uma distribuição normal, podemos então rejeita-la e afirmar que os dados não possuem distribuição normal.
+
+### Independência entre resíduos
+
+Para avaliar se existe independência entre os resíduos utilizaremos o teste Durbin-Watson:
+```{r}
+car::durbinWatsonTest(Mod3)
+```
+ 
+ O que indica que existe correlação entre os resíduos do modelo. Entretanto, o teste Durbin-Watson tem como pressuposição uma distribuição normal dos resíduos, o que não é o caso do nosso modelo, logo não podemos ter nenhuma conclusão deste teste.
+ 
+### Multicolineariedade
+
+Uma maneira de avaliar a multicolinearidade entre as variável independentes é a partir do grau de correlação a estas variáveis. Já vimos anteriormente no começo deste notebook, mas podemos reapresentar estes dados da seguinte maneira utilizando a bibliotea *psych*:
+
+```{r}
+psych::pairs.panels (df)
+```
+
+É possível avaliar um altísimo grau de correlação entre as variáveis independentes *bedrooms x bathrooms*, *bathrooms x size_sqft* e *bedroooms x size_sqft*. Quando temos um coeficiente $r > 0.5$ é uma presença de colinearidade entre as variáveis. Quando $r>0.8$ temos uma presença fortissima de colinearidade entre as variáveis.
+
+Outra possível ferramenta que sugere a colinearideade de variáveis é a função *vif* que tem como valor de corte, valor limite aceitavel de colineariedade, de 10. 
+O fator de inflação variância, no acrônimo do inglês *vif* é dada por
+
+\begin{equation*}
+VIF_1 = \frac{1}{1 - R^2}
+\end{equation*}
+
+onde $R^2$ é o coeficiente de determinação do modelo de regressão linear.
+
+```{r}
+car::vif(Mod3)
+```
+
+Quando temos um valor de $vif > 2.5$ já podemos concluir que existe uma correlação considerável entre esta e outras variáveis. Quanto maior a correção, maior o valor vif, então é mais fácil prever o compotamento de uma variável com alto $vif$ a partir de uma outra.
+
+Apesar disso, também é frequente o valor de corte de $vif$ ser bem alto, com o valor de $10$. 
+
+###Coeficiente de determinação para o modelo completo
+
+```{r}
+base::summary(Mod3)
+```
+
+Na estatística F temos um p-valor menor que $0.05$, portanto podemos afirmar que este modelo explica melhor que um modelo nulo.
+
+O valor de R quadrado ajustado é de $0.7781$, logo esse modelo explica $77.81%$ do valor de $Y$.
+
+Vejamos agora o intervalo de cofiança dos coeficientes.
+
+```{r}
+stats::confint(Mod3)
+```
+
+Como podemos ver na função *summary(Mod)*  e agora na *confint(Mod)*, todos os coeficientes são estatísticamente diferentes de zero. Logo, todos os coeficientes interferem de alguma forma no modelo.
+
+### Seleção de variáveis
+
+Serão geradas todas as combinações possíveis de variáveis para entãoo avaliar quais dos modelos disponíveis mais se adequa na regressão. Vale dizer que este método é muito custoso ou pouco eficiente para casos em que se tem um número de parâmetros muito grando. Como temos apenas 6 variáveis, serão gerados $2^6-1 = 63$ modelos que poderão ser avaliados graficamente a partir das métricas de Informação de Akaike(AIC), Estatística de Mallows(Cp) entre outros. 
+
+O critério de informação de Akaike pode ser obtido da seguinte forma
+\begin{equation*}
+AIC = 2k - 2ln(\widehat{L})
+\end{equation*}
+
+com $k$ sendo o número de parâmetros a serem estimados no modelo e $\widehat{L}$ o valor máximo da função de verossimilhança do modelo. A proposta é escolher um modelo que minimiza o valor de AIC.
+
+Já o critério $Cp$ de Mallows é baseado no conceito do erro quadrático médio (EQM) dos valores ajustados. Onde:
+\begin{equation*}
+C_p = \frac{SQE(p)}{QME} - n + 2(p+1)
+\end{equation*}
+
+Onde $n$ é o número de amostras, $p+1$ é o número de parâmetros no modelo mais o intercepto, e $SQE$ é a soma dos quadrados dos erros do submodelo. A idéia é encontrarmos um valor $C_p$ mais próximos o possível do número de parâmetros $p+1$. 
+
+```{r}
+modcompare<-olsrr:: ols_step_all_possible(Mod3)
+graphics::plot(modcompare)
+```
+
+Pela métrica *Adj, R-Square*, podemos ver que os três melhores modelos são os de índice 42, 57 e 63. Os mesmos três modelos apresentam os melhores desempenhos nos critérios de *AIC* e *C_p*. Podemos observar melhor quais são estes modelos da seguinte maneira:
+
+```{r}
+base::as.data.frame(modcompare[c(42, 57, 63),])
+```
+A única métrica que apresenta uma variação relevante de desempenho entre os três modelos é a Estatística de Mallows, onde no modelo 42 e 57 é indicado que o modelo está  - muito - mal especificado e possui um número insuficiente de termos. Para o modelo completo, o modelo 63, ainda temos um valor de $C_p = 7 > 6 = p$, logo ainda assim o modelo está mal especificado. 
+
+Como já realizamos todas as análises necessárias sobre o modelo completo, nos resta avaliar se existe alguma transformação em Y que nos ajude a resolver o problema de heterogeneidade de variâncias e da distribuição não normal dos resíduos.
+
+### Tranformações em Y
+
+Vejamos mais uma vez os gráficos dos resíduos do modelo.
+```{r}
+Mod4<-stats::lm(log(rent)~. ,df)
+graphics::par(mfrow=c(2,2))
+graphics::plot(Mod4)
+```
+
+É possível notar que a heterogeneidade de variância é mantida mesmo após aplicarmos a transformação em $Y$. Podemos ver isto também no teste ANOVA:
+
+```{r}
+stats::anova(Mod4 )
+```
+
+Buscando agora o melhor subconjunto de variáveis dependentes no modelo transformado:
+
+```{r}
+modcompare2<-olsrr:: ols_step_all_possible(Mod4)
+graphics::plot(modcompare2)
+```
+
+```{r}
+base::as.data.frame(modcompare2[c(22,  42, 57, 63),])
+```
+
+## Conclusão
+
+Os dados aqui apresentados parecem possui uma notável relação linear, entretanto não conseguimos atender os pressupostos definidos para o modelo de regressão linear simples e múltipla.
+
+Foi escolhida a variável com maior correlação linear com a variável dependente *rent* para a construção do modelo de regressão linear simples, entretanto a heterogeneidade de variâncias contida nos resíduos impediu que outros aspectos do modelo pudessem ser bem observados, como o teste de normalidade. Apesar disso, foi apresentado um valor $R^2$ multiplo altíssimo, de $0.7361$, nos sugerindo que a variável *size_sqft* consegue descrever bem a variável *rent*. Entretanto, por não atender os pressupostos iniciais, o modelo não é adequado para descrever o comportamento da variável dependente. As transformações em $Y$ também não foram suficientes para o ajuste do modelo, portanto se faz necessária a construção de outros modelos lineares de regressão para a melhor compreensão dessas variáveis.
+
+A inadequação do modelo anterior não é um impedimento para que a construção do modelo de regressão linear múltipla, pois em um cenário possível seria a utilização de um modelo múltiplo sem a variável independente *size_sqft*. Apesar disso, foi feita uma análise do modelo completo, com todas as variáveis do dataframe, e este modelo apresenta o mesmo desajuste do modelo linear simples visto anteriormente. A heterogeneidade de variâcias impede que os resíduos possuam uma distribuição normal. Por conta da heterocedasticidade também não foi possível realizar a verificação de outliers em nosso conjunto de dados. Entretanto, a amostra número $5$ é apresentada como ponto influente, talvez outlier, em nosso modelo.
+
+## Análises futuras
+
+A partir deste conjunto de dados creio que ainda há muito a ser analisado, visto que a maior parte das variáveis aqui contidas foram deixadas de lado por serem qualitativas. Buscar realizar análises de regressão que utilizem essas variáveis que foram excluídas podem ajudar a descrever melhor os dados. Além disso, o estudo de novos métodos de regressão linear pode ser essencial para a construção de modelos mais eficientes nesta função.
